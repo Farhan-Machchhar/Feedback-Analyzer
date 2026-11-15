@@ -10,12 +10,15 @@ Features:
 - Semantic Cache performance & cost-saving telemetry
 - Historical analytics & CSV/JSON export
 """
+import os
+import threading
 import time
 import json
 import pandas as pd
 import requests
 import streamlit as st
 import plotly.express as px
+import uvicorn
 
 from services.executive_brief import brief_generator
 from services.clustering import clusterer
@@ -28,7 +31,36 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-API_BASE_URL = "http://127.0.0.1:8000"
+API_BASE_URL = os.getenv("API_BASE_URL", "http://127.0.0.1:8000")
+
+
+# Auto-start FastAPI backend if running locally or on single-service platforms (e.g. Streamlit Cloud)
+@st.cache_resource
+def start_embedded_backend():
+    def _is_online():
+        try:
+            return requests.get(f"{API_BASE_URL}/api/v1/health", timeout=1.0).status_code == 200
+        except Exception:
+            return False
+
+    if _is_online():
+        return True
+
+    if "127.0.0.1" in API_BASE_URL or "localhost" in API_BASE_URL:
+        def _run_server():
+            import api
+            uvicorn.run(api.app, host="127.0.0.1", port=8000, log_level="warning")
+
+        thread = threading.Thread(target=_run_server, daemon=True)
+        thread.start()
+        for _ in range(20):
+            time.sleep(0.5)
+            if _is_online():
+                break
+    return True
+
+
+start_embedded_backend()
 
 
 # Helper functions to talk to FastAPI backend
